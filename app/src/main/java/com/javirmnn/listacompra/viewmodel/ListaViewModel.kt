@@ -1,86 +1,54 @@
 package com.javirmnn.listacompra.viewmodel
 
-import androidx.compose.runtime.mutableStateListOf
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.javirmnn.listacompra.data.DatabaseProvider
 import com.javirmnn.listacompra.data.Producto
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
-class ListaViewModel : ViewModel() {
+class ListaViewModel(application: Application) : AndroidViewModel(application) {
 
-    private var siguienteId = 1
+    private val dao = DatabaseProvider.getDatabase(application).productoDao()
 
-    private val _productos = mutableStateListOf<Producto>()
-    val productos = _productos
+    private val _productos = MutableStateFlow<List<Producto>>(emptyList())
+    val productos: StateFlow<List<Producto>> = _productos.asStateFlow()
+
+    init {
+        // Escuchamos la base de datos en tiempo real
+        viewModelScope.launch {
+            dao.obtenerTodos().collect { lista ->
+                _productos.value = lista
+            }
+        }
+    }
 
     fun agregarProducto(nombre: String) {
-
         if (nombre.isBlank()) return
-
-        _productos.add(
-            Producto(
-                id = siguienteId++,
-                nombre = nombre.trim()
-            )
-        )
-
-        ordenar()
+        viewModelScope.launch {
+            dao.insertar(Producto(nombre = nombre.trim()))
+        }
     }
 
     fun cambiarSeleccion(producto: Producto) {
-
-        val index =
-            _productos.indexOfFirst {
-                it.id == producto.id
-            }
-
-        if (index == -1) return
-
-        _productos[index] =
-            producto.copy(
-                seleccionado = !producto.seleccionado
-            )
-
-        ordenar()
+        viewModelScope.launch {
+            dao.actualizar(producto.copy(seleccionado = !producto.seleccionado))
+        }
     }
 
-    fun editarProducto(
-        producto: Producto,
-        nuevoNombre: String
-    ) {
-
-        val index =
-            _productos.indexOfFirst {
-                it.id == producto.id
-            }
-
-        if (index == -1) return
-
-        _productos[index] =
-            producto.copy(
-                nombre = nuevoNombre.trim()
-            )
-
-        ordenar()
+    fun editarProducto(producto: Producto, nuevoNombre: String) {
+        if (nuevoNombre.isBlank()) return
+        viewModelScope.launch {
+            dao.actualizar(producto.copy(nombre = nuevoNombre.trim()))
+        }
     }
 
-    fun eliminarProducto(
-        producto: Producto
-    ) {
-
-        _productos.remove(producto)
-    }
-
-    private fun ordenar() {
-
-        val ordenados =
-            _productos.sortedWith(
-                compareByDescending<Producto> {
-                    it.seleccionado
-                }.thenBy {
-                    it.nombre.lowercase()
-                }
-            )
-
-        _productos.clear()
-        _productos.addAll(ordenados)
+    fun eliminarProducto(producto: Producto) {
+        viewModelScope.launch {
+            dao.borrar(producto)
+        }
     }
 }

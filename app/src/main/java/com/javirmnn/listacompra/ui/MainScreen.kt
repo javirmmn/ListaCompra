@@ -19,7 +19,7 @@ import com.javirmnn.listacompra.viewmodel.ListaViewModel
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MainScreen(viewModel: ListaViewModel) {
-    val productos = viewModel.productos
+    val productos by viewModel.productos.collectAsState()
 
     var showDialog by remember { mutableStateOf(false) }
     var productoAEditar by remember { mutableStateOf<com.javirmnn.listacompra.data.Producto?>(null) }
@@ -70,7 +70,7 @@ fun MainScreen(viewModel: ListaViewModel) {
                 items(paraComprar, key = { it.id }) { producto ->
                     ProductoItem(
                         producto = producto,
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier,
                         onClick = { viewModel.cambiarSeleccion(producto) },
                         onEdit = { productoAEditar = producto },
                         onDelete = { productoABorrar = producto }
@@ -87,7 +87,7 @@ fun MainScreen(viewModel: ListaViewModel) {
                 items(posibles, key = { it.id }) { producto ->
                     ProductoItem(
                         producto = producto,
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier,
                         onClick = { viewModel.cambiarSeleccion(producto) },
                         onEdit = { productoAEditar = producto },
                         onDelete = { productoABorrar = producto }
@@ -153,7 +153,7 @@ fun DividerHeader(text: String) {
             .fillMaxWidth()
             .padding(top = 24.dp, bottom = 8.dp, start = 20.dp, end = 20.dp) // Ajustado para que quede mejor proporcionado
     ) {
-        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+        Divider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
         Text(
             text = text.uppercase(),
             modifier = Modifier.padding(horizontal = 12.dp),
@@ -161,7 +161,7 @@ fun DividerHeader(text: String) {
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary
         )
-        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+        Divider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
     }
 }
 
