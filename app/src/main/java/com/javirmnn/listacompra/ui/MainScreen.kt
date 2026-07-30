@@ -1,180 +1,410 @@
 package com.javirmnn.listacompra.ui
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.javirmnn.listacompra.data.ListaCompartida
 import com.javirmnn.listacompra.viewmodel.ListaViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(viewModel: ListaViewModel) {
+    val listas by viewModel.misListas.collectAsState()
+    val listaActiva by viewModel.listaActiva.collectAsState()
     val productos by viewModel.productos.collectAsState()
 
-    var showDialog by remember { mutableStateOf(false) }
-    var productoAEditar by remember { mutableStateOf<com.javirmnn.listacompra.data.Producto?>(null) }
-    var productoABorrar by remember { mutableStateOf<com.javirmnn.listacompra.data.Producto?>(null) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
 
-    val paraComprar = productos.filter { it.seleccionado }
-    val posibles = productos.filter { !it.seleccionado }
+    var showAddProductDialog by remember { mutableStateOf(false) }
+    var showCreateListDialog by remember { mutableStateOf(false) }
+    var showJoinListDialog by remember { mutableStateOf(false) }
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.ShoppingCart,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Lista de la compra", fontWeight = FontWeight.Bold)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background
+    // Controladores del menú de los 3 puntos
+    var expandedMenuId by remember { mutableStateOf<String?>(null) }
+    var showRenameDialogFor by remember { mutableStateOf<ListaCompartida?>(null) }
+    var showDeleteDialogFor by remember { mutableStateOf<ListaCompartida?>(null) }
+
+    var miAlias by remember { mutableStateOf("") }
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+    LaunchedEffect(uid) {
+        if (uid != null) {
+            FirebaseFirestore.getInstance().collection("usuarios").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    miAlias = doc.getString("alias") ?: "Usuario"
+                }
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Mis Listas",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(16.dp),
+                    color = MaterialTheme.colorScheme.primary
                 )
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Añadir")
-            }
-        }
-    ) { padding ->
-        LazyColumn(
-            contentPadding = padding,
-            modifier = Modifier.fillMaxSize()
-        ) {
+                HorizontalDivider()
 
-            // SECCIÓN 1: PARA COMPRAR (Siempre visible)
-            item { DividerHeader("Para comprar") }
-
-            if (paraComprar.isNotEmpty()) {
-                items(paraComprar, key = { it.id }) { producto ->
-                    ProductoItem(
-                        producto = producto,
-                        modifier = Modifier,
-                        onClick = { viewModel.cambiarSeleccion(producto) },
-                        onEdit = { productoAEditar = producto },
-                        onDelete = { productoABorrar = producto }
-                    )
+                LazyColumn(modifier = Modifier.weight(1f)) {
+                    items(listas) { lista ->
+                        NavigationDrawerItem(
+                            label = { Text(lista.nombre) },
+                            selected = lista.id == listaActiva?.id,
+                            onClick = {
+                                viewModel.seleccionarLista(lista)
+                                scope.launch { drawerState.close() }
+                            },
+                            badge = {
+                                Box {
+                                    IconButton(onClick = { expandedMenuId = lista.id }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "Opciones")
+                                    }
+                                    DropdownMenu(
+                                        expanded = expandedMenuId == lista.id,
+                                        onDismissRequest = { expandedMenuId = null }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Cambiar Nombre") },
+                                            onClick = {
+                                                showRenameDialogFor = lista
+                                                expandedMenuId = null
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Eliminar") },
+                                            onClick = {
+                                                showDeleteDialogFor = lista
+                                                expandedMenuId = null
+                                            }
+                                        )
+                                    }
+                                }
+                            },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                        )
+                    }
                 }
-            } else {
-                item { MensajeVacio("La lista está vacía") }
-            }
 
-            // SECCIÓN 2: PRODUCTOS (Siempre visible)
-            item { DividerHeader("Productos") }
-
-            if (posibles.isNotEmpty()) {
-                items(posibles, key = { it.id }) { producto ->
-                    ProductoItem(
-                        producto = producto,
-                        modifier = Modifier,
-                        onClick = { viewModel.cambiarSeleccion(producto) },
-                        onEdit = { productoAEditar = producto },
-                        onDelete = { productoABorrar = producto }
-                    )
-                }
-            } else {
-                item { MensajeVacio("No hay productos guardados") }
-            }
-
-            item { Spacer(modifier = Modifier.height(80.dp)) }
-        }
-    }
-
-    if (showDialog) {
-        AddProductDialog(
-            titulo = "Añadir producto",
-            onDismiss = { showDialog = false },
-            onConfirm = {
-                viewModel.agregarProducto(it)
-                showDialog = false
-            }
-        )
-    }
-
-    productoAEditar?.let { producto ->
-        AddProductDialog(
-            titulo = "Editar producto",
-            textoInicial = producto.nombre,
-            onDismiss = { productoAEditar = null },
-            onConfirm = { nuevoNombre ->
-                viewModel.editarProducto(producto, nuevoNombre)
-                productoAEditar = null
-            }
-        )
-    }
-
-    productoABorrar?.let { producto ->
-        AlertDialog(
-            onDismissRequest = { productoABorrar = null },
-            title = { Text("¿Estás seguro?") },
-            text = { Text("Vas a borrar '${producto.nombre}' de tu lista. Esta acción no se puede deshacer.") },
-            confirmButton = {
-                Button(
+                HorizontalDivider()
+                NavigationDrawerItem(
+                    label = { Text("Crear nueva lista") },
+                    selected = false,
                     onClick = {
-                        viewModel.eliminarProducto(producto)
-                        productoABorrar = null
+                        showCreateListDialog = true
+                        scope.launch { drawerState.close() }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) { Text("Borrar") }
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+                NavigationDrawerItem(
+                    label = { Text("Unirse a una lista") },
+                    selected = false,
+                    onClick = {
+                        showJoinListDialog = true
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text(listaActiva?.nombre ?: "Cargando...") },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menú")
+                        }
+                    },
+                    actions = {
+                        if (listaActiva != null) {
+                            var showCodeDialog by remember { mutableStateOf(false) }
+
+                            IconButton(onClick = { showCodeDialog = true }) {
+                                Icon(Icons.Default.Share, contentDescription = "Invitar")
+                            }
+
+                            if (showCodeDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showCodeDialog = false },
+                                    title = { Text("Invitar a alguien") },
+                                    text = { Text("Pásale este código secreto a quien quieras invitar:\n\n${listaActiva!!.codigoInvitacion}") },
+                                    confirmButton = {
+                                        TextButton(onClick = { showCodeDialog = false }) { Text("Entendido") }
+                                    }
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
+            },
+            floatingActionButton = {
+                if (listaActiva != null) {
+                    FloatingActionButton(onClick = { showAddProductDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Añadir")
+                    }
+                }
+            }
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                if (listaActiva == null) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No tienes ninguna lista. Abre el menú para crear una.")
+                    }
+                } else {
+                    val productosParaComprar = productos.filter { it.seleccionado }
+                    val productosBase = productos.filter { !it.seleccionado }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                    ) {
+                        if (productosParaComprar.isNotEmpty()) {
+                            item {
+                                Text(
+                                    text = "PARA COMPRAR",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
+                            items(productosParaComprar) { producto ->
+                                ProductoItem(
+                                    producto = producto,
+                                    onCheckedChange = { viewModel.cambiarEstado(producto) }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+
+                        if (productosBase.isNotEmpty()) {
+                            item {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "PRODUCTOS",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
+                            items(productosBase) { producto ->
+                                ProductoItem(
+                                    producto = producto,
+                                    onCheckedChange = { viewModel.cambiarEstado(producto) }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+
+                        if (productosParaComprar.isEmpty() && productosBase.isEmpty()) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("La lista está vacía", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // --- DIÁLOGOS EMERGENTES DE PRODUCTOS Y LISTAS ---
+
+    if (showAddProductDialog) {
+        AddProductDialog(
+            onDismiss = { showAddProductDialog = false },
+            onConfirm = { nombreProducto ->
+                viewModel.agregarProducto(nombreProducto, miAlias)
+                showAddProductDialog = false
+            }
+        )
+    }
+
+    if (showCreateListDialog) {
+        var newListName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCreateListDialog = false },
+            title = { Text("Crear Lista") },
+            text = {
+                OutlinedTextField(
+                    value = newListName,
+                    onValueChange = { newListName = it },
+                    label = { Text("Nombre de la lista (ej: Compra Casa)") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newListName.isNotBlank()) {
+                        viewModel.crearNuevaLista(newListName)
+                        showCreateListDialog = false
+                    }
+                }) { Text("Crear") }
             },
             dismissButton = {
-                TextButton(onClick = { productoABorrar = null }) { Text("Cancelar") }
+                TextButton(onClick = { showCreateListDialog = false }) { Text("Cancelar") }
             }
         )
     }
-}
 
-@Composable
-fun DividerHeader(text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 24.dp, bottom = 8.dp, start = 20.dp, end = 20.dp) // Ajustado para que quede mejor proporcionado
-    ) {
-        Divider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
-        Text(
-            text = text.uppercase(),
-            modifier = Modifier.padding(horizontal = 12.dp),
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.primary
+    if (showJoinListDialog) {
+        var inviteCode by remember { mutableStateOf("") }
+        var intentosFallidos by remember { mutableStateOf(0) }
+        var bloqueado by remember { mutableStateOf(false) }
+        var segundosRestantes by remember { mutableStateOf(0) }
+        var errorMensaje by remember { mutableStateOf("") }
+
+        LaunchedEffect(bloqueado) {
+            if (bloqueado) {
+                segundosRestantes = 30
+                while (segundosRestantes > 0) {
+                    delay(1000)
+                    segundosRestantes--
+                }
+                bloqueado = false
+                intentosFallidos = 0
+                errorMensaje = ""
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showJoinListDialog = false },
+            title = { Text("Unirse a Lista") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = inviteCode,
+                        onValueChange = { inviteCode = it.uppercase() },
+                        label = { Text("Código de 8 caracteres") },
+                        singleLine = true,
+                        enabled = !bloqueado,
+                        isError = errorMensaje.isNotEmpty()
+                    )
+
+                    if (errorMensaje.isNotEmpty()) {
+                        Text(
+                            text = errorMensaje,
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    if (bloqueado) {
+                        Text(
+                            text = "Demasiados intentos. Espera $segundosRestantes s.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !bloqueado && inviteCode.isNotBlank(),
+                    onClick = {
+                        viewModel.unirseALista(inviteCode) { exito ->
+                            if (exito) {
+                                showJoinListDialog = false
+                            } else {
+                                intentosFallidos++
+                                if (intentosFallidos >= 5) {
+                                    bloqueado = true
+                                } else {
+                                    errorMensaje = "Código incorrecto. Intentos: $intentosFallidos/5"
+                                }
+                            }
+                        }
+                    }
+                ) { Text("Unirse") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showJoinListDialog = false }) { Text("Cancelar") }
+            }
         )
-        Divider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
     }
-}
 
-// Nuevo componente para controlar los textos de lista vacía
-@Composable
-fun MensajeVacio(texto: String) {
-    Text(
-        text = texto,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 16.dp), // AQUÍ CAMBIAS LA SEPARACIÓN (antes era 32.dp)
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-        style = MaterialTheme.typography.bodyLarge
-    )
+    // --- DIÁLOGOS DE EDICIÓN DE LA LISTA (Renombrar / Eliminar) ---
+
+    if (showRenameDialogFor != null) {
+        var nuevoNombre by remember { mutableStateOf(showRenameDialogFor!!.nombre) }
+        AlertDialog(
+            onDismissRequest = { showRenameDialogFor = null },
+            title = { Text("Cambiar Nombre") },
+            text = {
+                OutlinedTextField(
+                    value = nuevoNombre,
+                    onValueChange = { nuevoNombre = it },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (nuevoNombre.isNotBlank()) {
+                        viewModel.cambiarNombreLista(showRenameDialogFor!!.id, nuevoNombre.trim())
+                        showRenameDialogFor = null
+                    }
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialogFor = null }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showDeleteDialogFor != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialogFor = null },
+            title = { Text("Eliminar Lista") },
+            text = { Text("¿Estás seguro de que quieres eliminar la lista '${showDeleteDialogFor!!.nombre}'? Esta acción no se puede deshacer y afectará a todos los miembros.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.eliminarLista(showDeleteDialogFor!!.id)
+                    showDeleteDialogFor = null
+                }) { Text("Eliminar", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialogFor = null }) { Text("Cancelar") }
+            }
+        )
+    }
 }

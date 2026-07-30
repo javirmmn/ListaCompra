@@ -4,4 +4,7 @@ plugins {
     // can apply them without attempting to re-register extensions at the root.
     alias(libs.plugins.kotlin.android) apply false
     alias(libs.plugins.ksp) apply false
+
+    // Firebase plugin
+    alias(libs.plugins.google.services) apply false
 }
