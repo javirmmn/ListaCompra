@@ -14,15 +14,12 @@ class ListaViewModel : ViewModel() {
     private val db = FirebaseFirestore.getInstance()
     private val auth = FirebaseAuth.getInstance()
 
-    // 1. Aquí guardamos las listas a las que el usuario tiene acceso
     private val _misListas = MutableStateFlow<List<ListaCompartida>>(emptyList())
     val misListas: StateFlow<List<ListaCompartida>> = _misListas.asStateFlow()
 
-    // 2. Aquí guardamos la lista en la que estamos dentro ahora mismo
     private val _listaActiva = MutableStateFlow<ListaCompartida?>(null)
     val listaActiva: StateFlow<ListaCompartida?> = _listaActiva.asStateFlow()
 
-    // 3. Los productos que hay DENTRO de la lista activa
     private val _productos = MutableStateFlow<List<Producto>>(emptyList())
     val productos: StateFlow<List<Producto>> = _productos.asStateFlow()
 
@@ -30,22 +27,15 @@ class ListaViewModel : ViewModel() {
         obtenerMisListas()
     }
 
-    // --- LÓGICA DE LAS SALAS (LISTAS) ---
-
     private fun obtenerMisListas() {
         val uid = auth.currentUser?.uid ?: return
-
-        // Buscamos solo las listas donde el UID del usuario esté en la lista de "miembros"
         db.collection("listas")
             .whereArrayContains("miembros", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) return@addSnapshotListener
-
                 if (snapshot != null) {
                     val listas = snapshot.documents.mapNotNull { it.toObject(ListaCompartida::class.java) }
                     _misListas.value = listas
-
-                    // Si el usuario entra y no tiene ninguna lista seleccionada, le abrimos la primera
                     if (_listaActiva.value == null && listas.isNotEmpty()) {
                         seleccionarLista(listas.first())
                     }
@@ -62,55 +52,46 @@ class ListaViewModel : ViewModel() {
         val uid = auth.currentUser?.uid ?: return
         val idLista = db.collection("listas").document().id
         val codigoSecreto = generarCodigo()
-
-        val nuevaLista = ListaCompartida(
-            id = idLista,
-            nombre = nombreLista,
-            codigoInvitacion = codigoSecreto,
-            miembros = listOf(uid) // El que la crea es el primer miembro
-        )
-
+        val nuevaLista = ListaCompartida(idLista, nombreLista, codigoSecreto, listOf(uid))
         db.collection("listas").document(idLista).set(nuevaLista)
     }
 
     fun unirseALista(codigo: String, onResultado: (Boolean) -> Unit) {
         val uid = auth.currentUser?.uid ?: return
-
-        db.collection("listas")
-            .whereEqualTo("codigoInvitacion", codigo)
-            .get()
+        db.collection("listas").whereEqualTo("codigoInvitacion", codigo).get()
             .addOnSuccessListener { resultados ->
                 if (!resultados.isEmpty) {
                     val listaEncontrada = resultados.documents.first()
                     db.collection("listas").document(listaEncontrada.id)
                         .update("miembros", FieldValue.arrayUnion(uid))
-                        .addOnSuccessListener {
-                            onResultado(true) // ¡Código correcto!
-                        }
+                        .addOnSuccessListener { onResultado(true) }
                 } else {
-                    onResultado(false) // ¡Código incorrecto!
+                    onResultado(false)
                 }
-            }
-            .addOnFailureListener {
-                onResultado(false) // Fallo de conexión o error
-            }
+            }.addOnFailureListener { onResultado(false) }
     }
 
     private fun generarCodigo(): String {
-        // Generamos un código de 8 caracteres (2,8 billones de combinaciones)
         val caracteres = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return (1..8).map { caracteres.random() }.joinToString("")
     }
 
+    fun cambiarNombreLista(listaId: String, nuevoNombre: String) {
+        db.collection("listas").document(listaId).update("nombre", nuevoNombre)
+    }
 
-    // --- LÓGICA DE LOS PRODUCTOS (Ahora dentro de carpetas) ---
+    fun eliminarLista(listaId: String) {
+        db.collection("listas").document(listaId).delete()
+        if (_listaActiva.value?.id == listaId) {
+            _listaActiva.value = null
+            _productos.value = emptyList()
+        }
+    }
 
     private fun obtenerProductos(listaId: String) {
-        // Ahora buscamos en listas -> [ID de la lista] -> productos
         db.collection("listas").document(listaId).collection("productos")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) return@addSnapshotListener
-
                 if (snapshot != null) {
                     val listaProductos = snapshot.documents.mapNotNull { it.toObject(Producto::class.java) }
                     _productos.value = listaProductos
@@ -120,39 +101,48 @@ class ListaViewModel : ViewModel() {
 
     fun agregarProducto(nombre: String, aliasDelUsuario: String) {
         val listaId = _listaActiva.value?.id ?: return
-
-        // Preparamos el camino hacia la sub-carpeta de esta lista
         val rutaProductos = db.collection("listas").document(listaId).collection("productos")
         val idDocumento = rutaProductos.document().id
-
-        val nuevoProducto = Producto(
-            id = idDocumento,
-            nombre = nombre,
-            seleccionado = false,
-            anadidoPor = aliasDelUsuario // ¡Aquí está tu parámetro perfectamente integrado!
-        )
-
+        val nuevoProducto = Producto(idDocumento, nombre, false, aliasDelUsuario, 1, "")
         rutaProductos.document(idDocumento).set(nuevoProducto)
     }
 
+    // MODIFICADO: Al seleccionar, la cantidad pasa automáticamente a 1
     fun cambiarEstado(producto: Producto) {
         val listaId = _listaActiva.value?.id ?: return
-        db.collection("listas").document(listaId).collection("productos").document(producto.id)
-            .update("seleccionado", !producto.seleccionado)
-    }
+        val nuevoEstado = !producto.seleccionado
 
-    fun cambiarNombreLista(listaId: String, nuevoNombre: String) {
-        db.collection("listas").document(listaId).update("nombre", nuevoNombre)
-    }
-
-    fun eliminarLista(listaId: String) {
-        // Eliminamos el documento de la lista de la base de datos
-        db.collection("listas").document(listaId).delete()
-
-        // Si la lista que acabamos de borrar era la que teníamos abierta en pantalla, la cerramos
-        if (_listaActiva.value?.id == listaId) {
-            _listaActiva.value = null
-            _productos.value = emptyList()
+        val actualizaciones = mutableMapOf<String, Any>("seleccionado" to nuevoEstado)
+        if (nuevoEstado) {
+            actualizaciones["cantidad"] = 1
         }
+
+        db.collection("listas").document(listaId).collection("productos")
+            .document(producto.id).update(actualizaciones)
+    }
+
+    fun actualizarCantidad(producto: Producto, nuevaCantidad: Int) {
+        if (nuevaCantidad < 1) return
+        val listaId = _listaActiva.value?.id ?: return
+        db.collection("listas").document(listaId).collection("productos")
+            .document(producto.id).update("cantidad", nuevaCantidad)
+    }
+
+    fun actualizarComentario(producto: Producto, nuevoComentario: String) {
+        val listaId = _listaActiva.value?.id ?: return
+        db.collection("listas").document(listaId).collection("productos")
+            .document(producto.id).update("comentario", nuevoComentario)
+    }
+
+    fun cambiarNombreProducto(productoId: String, nuevoNombre: String) {
+        val listaId = _listaActiva.value?.id ?: return
+        db.collection("listas").document(listaId).collection("productos")
+            .document(productoId).update("nombre", nuevoNombre)
+    }
+
+    fun eliminarProducto(productoId: String) {
+        val listaId = _listaActiva.value?.id ?: return
+        db.collection("listas").document(listaId).collection("productos")
+            .document(productoId).delete()
     }
 }
